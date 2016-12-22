@@ -1,110 +1,128 @@
-FROM jacekmarchwicki/android:latest
+# FROM jacekmarchwicki/android:latest
+# FROM uber/android-build-environment:latest
+FROM ubuntu:14.04
 
 MAINTAINER Aiden Montgomery "aiden@constructivecoding.com"
 
-RUN groupadd --gid 1000 node \
-  && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
+# Sets language to UTF8 : this works in pretty much all cases
+ENV LANG en_US.UTF-8
+RUN locale-gen $LANG
 
-# gpg keys listed at https://github.com/nodejs/node
-RUN set -ex \
-  && for key in \
-    9554F04D7259F04124DE6B476D5A82AC7E37093B \
-    94AE36675C464D64BAFA68DD7434390BDBE9B9C5 \
-    0034A06D9D9B0064CE8ADF6BF1747F4AD2306D93 \
-    FD3A5288F042B6850C66B31F09FE44734EB7990E \
-    71DCFD284A79C3B38668286BC97EC7A07EDE3FC1 \
-    DD8F2338BAE7501E3DD5AC78C273792F7D83545D \
-    B9AE9905FFD7803F25714661B63B535A4C206CA9 \
-    C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8 \
-  ; do \
-    gpg --keyserver ha.pool.sks-keyservers.net --recv-keys "$key"; \
-  done
+ENV DOCKER_ANDROID_LANG en_US
+ENV DOCKER_ANDROID_DISPLAY_NAME mobileci-docker
 
-ENV NPM_CONFIG_LOGLEVEL info
-ENV NODE_VERSION 6.9.2
+# Never ask for confirmations
+ENV DEBIAN_FRONTEND noninteractive
 
-RUN curl -SLO "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" \
-  && curl -SLO "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt.asc" \
-  && gpg --batch --decrypt --output SHASUMS256.txt SHASUMS256.txt.asc \
-  && grep " node-v$NODE_VERSION-linux-x64.tar.xz\$" SHASUMS256.txt | sha256sum -c - \
-  && tar -xJf "node-v$NODE_VERSION-linux-x64.tar.xz" -C /usr/local --strip-components=1 \
-  && rm "node-v$NODE_VERSION-linux-x64.tar.xz" SHASUMS256.txt.asc SHASUMS256.txt \
-  && ln -s /usr/local/bin/node /usr/local/bin/nodejs
+# Update apt-get
+RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get update
+RUN apt-get dist-upgrade -y
 
-# Now Ruby!
+# Installing packages
+RUN apt-get install -y \
+  autoconf \
+  build-essential \
+  bzip2 \
+  curl \
+  gcc \
+  git \
+  groff \
+  lib32stdc++6 \
+  lib32z1 \
+  lib32z1-dev \
+  lib32ncurses5 \
+  lib32bz2-1.0 \
+  libc6-dev \
+  libgmp-dev \
+  libmpc-dev \
+  libmpfr-dev \
+  libxslt-dev \
+  libxml2-dev \
+  m4 \
+  make \
+  ncurses-dev \
+  ocaml \
+  openssh-client \
+  pkg-config \
+  python-software-properties \
+  rsync \
+  software-properties-common \
+  unzip \
+  wget \
+  zip \
+  zlib1g-dev \
+  --no-install-recommends
 
-# skip installing gem documentation
-RUN mkdir -p /usr/local/etc \
-	&& { \
-		echo 'install: --no-document'; \
-		echo 'update: --no-document'; \
-	} >> /usr/local/etc/gemrc
+# Install Java
+RUN apt-add-repository ppa:openjdk-r/ppa
+RUN apt-get update
+RUN apt-get -y install openjdk-8-jdk
 
-ENV RUBY_MAJOR 2.3
-ENV RUBY_VERSION 2.3.3
-ENV RUBY_DOWNLOAD_SHA256 241408c8c555b258846368830a06146e4849a1d58dcaf6b14a3b6a73058115b7
-ENV RUBYGEMS_VERSION 2.6.8
+# Clean Up Apt-get
+RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get clean
 
-# some of ruby's build scripts are written in ruby
-#   we purge system ruby later to make sure our final image uses what we just built
-RUN set -ex \
-	\
-	&& buildDeps=' \
-		build-essential \
-		autoconf \
-		zlib1g-dev \
-		libssl-dev \
-		bison \
-		libgdbm-dev \
-		ruby \
-	' \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends $buildDeps \
-	&& rm -rf /var/lib/apt/lists/* \
-	\
-	&& wget -O ruby.tar.gz "https://cache.ruby-lang.org/pub/ruby/${RUBY_MAJOR%-rc}/ruby-$RUBY_VERSION.tar.gz" \
-	&& echo "$RUBY_DOWNLOAD_SHA256 *ruby.tar.gz" | sha256sum -c - \
-	\
-	&& mkdir -p /usr/src/ruby \
-	&& tar -xzf ruby.tar.gz -C /usr/src/ruby --strip-components=1 \
-	&& rm ruby.tar.gz \
-	\
-	&& cd /usr/src/ruby \
-	\
-# hack in "ENABLE_PATH_CHECK" disabling to suppress:
-#   warning: Insecure world writable dir
-	&& { \
-		echo '#define ENABLE_PATH_CHECK 0'; \
-		echo; \
-		cat file.c; \
-	} > file.c.new \
-	&& mv file.c.new file.c \
-	\
-	&& autoconf \
-	&& ./configure --disable-install-doc --enable-shared \
-	&& make -j"$(nproc)" \
-	&& make install \
-	\
-#&& apt-get purge -y --auto-remove $buildDeps \ # don't remove these
-	&& cd / \
-	&& rm -r /usr/src/ruby \
-	\
-	&& gem update --system "$RUBYGEMS_VERSION"
+# Install Android SDK
+RUN wget https://dl.google.com/android/android-sdk_r24.4.1-linux.tgz
+RUN tar -xvzf android-sdk_r24.4.1-linux.tgz
+RUN mv android-sdk-linux /usr/local/android-sdk
+RUN rm android-sdk_r24.4.1-linux.tgz
 
-ENV BUNDLER_VERSION 1.13.6
+ENV ANDROID_COMPONENTS platform-tools,tools,build-tools-23.0.1,build-tools-23.0.2,android-23,addon-google_apis_x86-google-21,extra-android-support,extra-android-m2repository,extra-google-m2repository,extra-google-google_play_services,sys-img-armeabi-v7a-android-23
 
-RUN gem install bundler --version "$BUNDLER_VERSION"
+# Install Android tools
+RUN echo y | /usr/local/android-sdk/tools/android update sdk --filter "platform-tools,tools,build-tools-23.0.1,build-tools-23.0.2,android-23,addon-google_apis_x86-google-21,extra-android-support,extra-android-m2repository,extra-google-m2repository,extra-google-google_play_services,sys-img-armeabi-v7a-android-23" --no-ui -a
 
-# install things globally, for great justice
-# and don't create ".bundle" in all our apps
-ENV GEM_HOME /usr/local/bundle
-ENV BUNDLE_PATH="$GEM_HOME" \
-	BUNDLE_BIN="$GEM_HOME/bin" \
-	BUNDLE_SILENCE_ROOT_WARNING=1 \
-	BUNDLE_APP_CONFIG="$GEM_HOME"
-ENV PATH $BUNDLE_BIN:$PATH
-RUN mkdir -p "$GEM_HOME" "$BUNDLE_BIN" \
-	&& chmod 777 "$GEM_HOME" "$BUNDLE_BIN"
+# Install Android NDK
+RUN wget http://dl.google.com/android/repository/android-ndk-r12-linux-x86_64.zip
+RUN unzip android-ndk-r12-linux-x86_64.zip
+RUN mv android-ndk-r12 /usr/local/android-ndk
+RUN rm android-ndk-r12-linux-x86_64.zip
 
-ENV LANG C.UTF-8
-RUN gem install fastlane
+# Environment variables
+ENV ANDROID_HOME /usr/local/android-sdk
+ENV ANDROID_SDK_HOME $ANDROID_HOME
+ENV ANDROID_NDK_HOME /usr/local/android-ndk
+ENV JENKINS_HOME $HOME
+ENV PATH ${INFER_HOME}/bin:${PATH}
+ENV PATH $PATH:$ANDROID_SDK_HOME/tools
+ENV PATH $PATH:$ANDROID_SDK_HOME/platform-tools
+ENV PATH $PATH:$ANDROID_SDK_HOME/build-tools/23.0.2
+ENV PATH $PATH:$ANDROID_SDK_HOME/build-tools/23.0.1
+ENV PATH $PATH:$ANDROID_NDK_HOME
+
+# Export JAVA_HOME variable
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64/
+
+# Support Gradle
+ENV TERM dumb
+ENV JAVA_OPTS "-Xms4096m -Xmx4096m"
+ENV GRADLE_OPTS "-XX:+UseG1GC -XX:MaxGCPauseMillis=1000"
+
+# Cleaning
+RUN apt-get clean
+
+# Add build user account, values are set to default below
+ENV RUN_USER mobileci
+ENV RUN_UID 5089
+
+RUN id $RUN_USER || adduser --uid "$RUN_UID" \
+    --gecos 'Build User' \
+    --shell '/bin/sh' \
+    --disabled-login \
+    --disabled-password "$RUN_USER"
+
+# Fix permissions
+RUN chown -R $RUN_USER:$RUN_USER $ANDROID_HOME $ANDROID_SDK_HOME $ANDROID_NDK_HOME
+RUN chmod -R a+rx $ANDROID_HOME $ANDROID_SDK_HOME $ANDROID_NDK_HOME
+
+# Creating project directories prepared for build when running
+# `docker run`
+ENV PROJECT /project
+RUN mkdir $PROJECT
+RUN chown -R $RUN_USER:$RUN_USER $PROJECT
+WORKDIR $PROJECT
+
+USER $RUN_USER
+RUN echo "sdk.dir=$ANDROID_HOME" > local.properties
